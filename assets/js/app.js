@@ -52,6 +52,8 @@ function markActiveNav(path) {
   });
 }
 
+let activeUnmount = null;
+
 function render() {
   const path = currentPath();
   let view = null;
@@ -70,10 +72,16 @@ function render() {
     return;
   }
 
+  if (activeUnmount) {
+    activeUnmount();
+    activeUnmount = null;
+  }
+
   document.title = view.title;
   root.innerHTML = view.html;
   markActiveNav(path);
   if (view.mount) view.mount(root, ctx);
+  activeUnmount = view.unmount || null;
 
   document.querySelector('.site-nav')?.classList.remove('open');
   document.querySelector('.nav-toggle')?.setAttribute('aria-expanded', 'false');

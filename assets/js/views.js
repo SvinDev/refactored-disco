@@ -2,6 +2,7 @@
 
 import { ELECTIONS, getElection, electionStatus, STATUS_LABEL, formatDate, plural } from './data.js';
 import { hasWebCrypto, normalizeReceipt, shortHash } from './crypto.js';
+import * as tg from './telegram.js';
 import * as store from './store.js';
 
 export const esc = (value) => String(value).replace(/[&<>"']/g, (ch) => (
@@ -27,6 +28,7 @@ function electionCard(election) {
         ${status === 'active' && !voted
           ? `<a class="btn" href="#/golosovanie/${election.id}">Взять бюллетень</a>`
           : ''}
+        ${status === 'active' && voted ? '<span class="tiny">Этот аккаунт бюллетень уже получил</span>' : ''}
         ${voted ? `<a class="btn secondary" href="#/kvitanciya/${election.id}">Моя квитанция</a>` : ''}
         <a class="btn ghost" href="#/rezultaty/${election.id}">Результаты</a>
       </div>
@@ -52,8 +54,8 @@ export function home() {
 
     <div class="grid cols-3">
       <article class="card feature">
-        <h3><span class="ico" aria-hidden="true">1</span>Анонимный бюллетень</h3>
-        <p class="muted">Список получивших бюллетень и реестр голосов хранятся раздельно. Первый знает, что вы голосовали, второй — что выбрано, но связи между ними нет.</p>
+        <h3><span class="ico" aria-hidden="true">1</span>Проверка избирателя</h3>
+        <p class="muted">Вход по одноразовому коду из бота: один аккаунт — один бюллетень. Список получивших бюллетень хранится отдельно от реестра голосов, связи между ними нет.</p>
       </article>
       <article class="card feature">
         <h3><span class="ico" aria-hidden="true">2</span>Квитанция избирателя</h3>
@@ -72,53 +74,157 @@ export function home() {
   return { title: 'ЭГ-Демо — прототип электронного голосования', html };
 }
 
-/* ————— вход ————— */
+/* ————— вход через симулированного бота Telegram ————— */
+
+const TIME_FMT = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
+
+function chatMessage(message) {
+  const text = esc(message.text).replace(/\n/g, '<br>');
+  return `<div class="tg-msg is-${message.from}"><span>${text}</span><time>${TIME_FMT.format(new Date(message.ts))}</time></div>`;
+}
 
 export function signIn() {
   if (store.isSignedIn()) return { redirect: '#/kabinet' };
+
+  const account = store.telegramAccount();
+  const telegram = store.telegramState();
+  const code = telegram.code;
+  const state = tg.codeState(code);
+
   const html = `
     <div class="page-head">
-      <h1>Вход в демо-кабинет</h1>
-      <p class="muted">В настоящей системе здесь была бы проверка личности избирателя. В прототипе она заменена на произвольную строку: из неё считается анонимный токен, и по нему определяется, брали ли вы уже бюллетень.</p>
+      <h1>Подтверждение избирателя</h1>
+      <p class="muted">Бюллетень выдаётся по одноразовому коду из бота. Один аккаунт Telegram — один бюллетень: повторно взять его не получится.</p>
+    </div>
+
+    <div class="notice warn" style="margin-bottom:18px">
+      <p><strong>Бот симулирован.</strong> Аккаунта <span class="mono">@${esc(tg.BOT_HANDLE)}</span> не существует, сеть не используется, токен бота нигде не хранится. Переписка ниже разыгрывается прямо в браузере — на статическом сайте настоящая проверка кода невозможна, её должен выполнять сервер.</p>
     </div>
 
     <div class="grid cols-2">
-      <form class="card" id="signin-form" novalidate>
-        <label class="field" for="voter-id">Демо-идентификатор
-          <span class="hint">Любое слово или набор символов — например, <code>test-2026</code>. Не используйте настоящие персональные данные.</span>
-          <input type="text" id="voter-id" name="voterId" autocomplete="off" spellcheck="false" placeholder="test-2026" required>
-        </label>
-        <p class="tiny" id="signin-error" role="alert"></p>
-        <button class="btn" type="submit">Войти</button>
-      </form>
+      <div class="card tg-card">
+        <div class="tg-head">
+          <span class="tg-avatar" aria-hidden="true">tg</span>
+          <span class="tg-title">
+            <b>@${esc(tg.BOT_HANDLE)}</b>
+            <small>симуляция чата</small>
+          </span>
+        </div>
+        <p class="tiny">Вы пишете боту как <strong>@${esc(account.username)}</strong> · id ${account.id}</p>
 
-      <div class="card">
-        <h3>Что происходит при входе</h3>
-        <ol class="muted" style="padding-left:20px;margin:0">
-          <li>Строка хешируется функцией SHA-256 прямо в браузере.</li>
-          <li>Сохраняется только полученный токен — исходную строку восстановить из него нельзя.</li>
-          <li>При подаче бюллетеня токен попадает в список выдачи, но не в запись о голосе.</li>
-        </ol>
-        <p class="tiny" style="margin-top:14px">Ничего не отправляется на сервер: страница полностью статична.</p>
+        <div class="tg-chat" id="tg-chat">
+          ${telegram.log.length
+            ? telegram.log.map(chatMessage).join('')
+            : '<p class="tiny" style="text-align:center;margin:auto">Отправьте боту <span class="mono">/start</span>, чтобы получить код</p>'}
+        </div>
+
+        <div class="btn-row">
+          <button class="btn" type="button" id="send-start">${telegram.log.length ? 'Запросить новый код' : 'Отправить /start'}</button>
+        </div>
       </div>
+
+      <form class="card" id="code-form" novalidate>
+        <h2 style="font-size:1.15rem">Код из бота</h2>
+        <label class="field" for="code-input">Шесть цифр
+          <span class="hint">Код одноразовый и действует пять минут.</span>
+          <input type="text" id="code-input" name="code" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="7" spellcheck="false" placeholder="000000" ${state === 'valid' ? '' : 'disabled'}>
+        </label>
+        <p class="tiny" id="code-status" aria-live="polite"></p>
+        <p class="tiny" id="code-error" role="alert"></p>
+        <button class="btn" type="submit" id="code-submit" ${state === 'valid' ? '' : 'disabled'}>Подтвердить и войти</button>
+      </form>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h2 style="font-size:1.15rem">Что даёт такая проверка — и чего не даёт</h2>
+      <div class="grid cols-2">
+        <div>
+          <h3 style="font-size:.98rem">Защищает от</h3>
+          <ul class="muted" style="padding-left:20px;margin:0">
+            <li>повторного голосования одним и тем же аккаунтом;</li>
+            <li>входа по подсмотренному коду: код одноразовый, живёт 5 минут и гасится после первого входа;</li>
+            <li>перебора: после ${tg.MAX_ATTEMPTS} неверных попыток код аннулируется.</li>
+          </ul>
+        </div>
+        <div>
+          <h3 style="font-size:.98rem">Не защищает от</h3>
+          <ul class="muted" style="padding-left:20px;margin:0">
+            <li>накрутки с разных аккаунтов: их покупают пачками вместе с номерами;</li>
+            <li>передачи кода другому человеку — проверяется владение аккаунтом, а не личность;</li>
+            <li>доступа к самому мессенджеру: кто читает чужие сообщения, тот получит и код.</li>
+          </ul>
+        </div>
+      </div>
+      <p class="tiny" style="margin-top:14px">Привязка к мессенджеру даёт «один голос на аккаунт», а не «один голос на избирателя». Проверьте сами: возьмите другой аккаунт и попробуйте проголосовать второй раз.</p>
+      <div class="btn-row"><button class="btn secondary" type="button" id="switch-account">Взять другой аккаунт</button></div>
     </div>`;
 
-  function mount(root) {
-    const form = root.querySelector('#signin-form');
-    const error = root.querySelector('#signin-error');
+  let timer = null;
+
+  function mount(root, ctx) {
+    const form = root.querySelector('#code-form');
+    const input = root.querySelector('#code-input');
+    const error = root.querySelector('#code-error');
+    const status = root.querySelector('#code-status');
+    const submit = root.querySelector('#code-submit');
+    const chat = root.querySelector('#tg-chat');
+    chat.scrollTop = chat.scrollHeight;
+
+    function refreshStatus() {
+      const current = store.telegramState().code;
+      const now = Date.now();
+      const currentState = tg.codeState(current, now);
+      if (currentState === 'none') {
+        status.textContent = 'Код ещё не запрошен.';
+        return;
+      }
+      if (currentState !== 'valid') {
+        status.textContent = currentState === 'expired'
+          ? 'Срок действия кода истёк — запросите новый.'
+          : 'Код больше не действует — запросите новый.';
+        input.disabled = true;
+        submit.disabled = true;
+        clearInterval(timer);
+        return;
+      }
+      status.textContent = `Код действует ещё ${tg.formatCountdown(tg.msLeft(current, now))} · попыток осталось: ${tg.MAX_ATTEMPTS - current.attempts}`;
+    }
+
+    refreshStatus();
+    timer = setInterval(refreshStatus, 1000);
+
+    root.querySelector('#send-start').addEventListener('click', () => {
+      store.requestCode();
+      ctx.render();
+    });
+
+    root.querySelector('#switch-account').addEventListener('click', () => {
+      const next = store.switchAccount();
+      ctx.toast(`Теперь вы пишете боту как @${next.username}`);
+      ctx.render();
+    });
+
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       error.textContent = '';
-      try {
-        await store.signIn(form.elements.voterId.value);
+      const result = await store.signInWithCode(input.value);
+      if (result.ok) {
+        ctx.toast('Личность подтверждена');
         location.hash = '#/kabinet';
-      } catch (err) {
-        error.textContent = err.message;
+        return;
       }
+      error.textContent = result.reason;
+      input.select();
+      refreshStatus();
     });
   }
 
-  return { title: 'Вход — ЭГ-Демо', html, mount };
+  function unmount() {
+    clearInterval(timer);
+  }
+
+  return { title: 'Подтверждение избирателя — ЭГ-Демо', html, mount, unmount };
 }
 
 /* ————— кабинет ————— */
@@ -133,7 +239,7 @@ export function cabinet() {
   const html = `
     <div class="page-head">
       <h1>Демо-кабинет</h1>
-      <p class="muted">Вы вошли как <strong>${esc(session.label)}</strong>. Доступно ${plural(active.length, 'голосование', 'голосования', 'голосований')}, бюллетеней подано: ${votedCount}.</p>
+      <p class="muted">Личность подтверждена через бота: <strong>${esc(session.label)}</strong> · id ${session.tg.id}. Доступно ${plural(active.length, 'голосование', 'голосования', 'голосований')}, бюллетеней подано: ${votedCount}.</p>
       <div class="btn-row">
         <button class="btn secondary" type="button" id="signout">Выйти</button>
         <a class="btn ghost" href="#/proverka">Проверить свой голос</a>
@@ -305,7 +411,7 @@ export function receipt(params) {
 /* ————— проверка голоса ————— */
 
 export function verify() {
-  const mine = Object.entries(store.getState().mine);
+  const mine = store.allBallots();
   const html = `
     <div class="page-head">
       <h1>Проверка голоса</h1>
@@ -333,7 +439,7 @@ export function verify() {
 
     if (fill) {
       fill.addEventListener('click', () => {
-        input.value = mine[0][1].receipt;
+        input.value = mine[0].receipt;
         input.focus();
       });
     }
@@ -541,7 +647,7 @@ export function about() {
     <div class="card">
       <h2>Путь бюллетеня</h2>
       <ol class="muted" style="padding-left:20px">
-        <li><strong>Вход.</strong> Строка, введённая при входе, превращается в токен <span class="mono">SHA-256(«voter:» + строка)</span>. Сама строка нигде не сохраняется.</li>
+        <li><strong>Проверка избирателя.</strong> Бот выдаёт одноразовый код: пять минут жизни, три попытки, гашение после первого входа. Из идентификатора аккаунта считается токен <span class="mono">SHA-256(«tg:» + id)</span> — он и определяет, что бюллетень выдаётся один раз.</li>
         <li><strong>Выдача бюллетеня.</strong> В список выдачи попадает <span class="mono">SHA-256(токен + голосование)</span> — он отвечает только на вопрос «брал ли этот избиратель бюллетень».</li>
         <li><strong>Подача голоса.</strong> Браузер генерирует случайную соль и кладёт в реестр вариант и подтверждение <span class="mono">SHA-256(вариант + соль)</span>. Токена избирателя в записи нет.</li>
         <li><strong>Квитанция.</strong> Это первые 16 символов хеша записи. Соль остаётся у избирателя — она и есть доказательство авторства.</li>
@@ -557,7 +663,8 @@ export function about() {
     <div class="card">
       <h2>Чего этот прототип не делает</h2>
       <ul class="muted" style="padding-left:20px">
-        <li><strong>Не проверяет личность.</strong> Настоящая система требует подтверждённой идентификации избирателя; здесь достаточно любой строки.</li>
+        <li><strong>Не проверяет личность.</strong> Код из мессенджера подтверждает владение аккаунтом, а не то, что перед экраном именно этот избиратель и что он вообще внесён в список. Аккаунты продаются пачками вместе с номерами, поэтому от организованной накрутки такая привязка не спасает — в демо это видно по кнопке «Взять другой аккаунт». Настоящая система опирается на подтверждённую идентификацию и список избирателей.</li>
+        <li><strong>Не имеет настоящего бота.</strong> Бот здесь симулирован: статический сайт не может хранить токен бота и проверять коды — это работа сервера.</li>
         <li><strong>Не шифрует голоса до конца подсчёта.</strong> В работающих системах применяют гомоморфное шифрование или перемешивающие сети, чтобы вариант был скрыт до завершения голосования. Здесь вариант лежит в реестре открыто — тайна держится лишь на отсутствии связи с избирателем.</li>
         <li><strong>Не защищает от давления на избирателя.</strong> Квитанция плюс соль позволяют избирателю доказать свой выбор — значит, и показать его тому, кто требует отчёта. Реальные системы борются с этим переголосованием и фиктивными квитанциями.</li>
         <li><strong>Не имеет распределённого реестра и наблюдателей.</strong> Цепочка живёт в одном браузере, её некому независимо заверить. Настоящая проверяемость требует нескольких независимых узлов и открытого наблюдения.</li>
@@ -570,7 +677,7 @@ export function about() {
 
     <div class="card">
       <h2>Данные и сброс</h2>
-      <p class="muted">Всё состояние демо хранится в <span class="mono">localStorage</span> под ключом <span class="mono">eg-demo.v1</span>. Можно очистить его и начать с чистого листа — реестр будет сгенерирован заново.</p>
+      <p class="muted">Всё состояние демо хранится в <span class="mono">localStorage</span> под ключом <span class="mono">eg-demo.v2</span>. Можно очистить его и начать с чистого листа — реестр будет сгенерирован заново.</p>
       ${hasWebCrypto ? '' : '<div class="notice warn"><p>Web Crypto недоступен в текущем контексте, используется упрощённая замена хеша. Откройте страницу по https, чтобы работал настоящий SHA-256.</p></div>'}
       <div class="btn-row"><button class="btn secondary" type="button" id="reset">Сбросить демо</button></div>
     </div>`;

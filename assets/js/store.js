@@ -2,15 +2,21 @@
 
 import { ELECTIONS, electionStatus, getElection } from './data.js';
 import { sha256Hex, randomHex, receiptFromHash } from './crypto.js';
+import * as tg from './telegram.js';
 
-const KEY = 'eg-demo.v1';
+const KEY = 'eg-demo.v2';
 
 const EMPTY = {
-  version: 1,
-  session: null,      // { token, label } — анонимный токен избирателя
+  version: 2,
+  session: null,      // { token, label, tg, issuedTokens } — привязка к демо-аккаунту Telegram
+  telegram: {         // состояние симулированного бота
+    account: null,    // текущий демо-аккаунт
+    code: null,       // выданный одноразовый код
+    log: []           // переписка с ботом
+  },
   chain: [],          // публичный реестр голосов (хеш-цепочка)
-  issued: {},         // electionId -> [хеши токенов, получивших бюллетень]
-  mine: {},           // electionId -> { receipt, salt, optionId, blockHash, ts } — только в вашем браузере
+  issued: {},         // electionId -> [хеши «избиратель + голосование»], получившие бюллетень
+  ballots: {},        // токен избирателя -> electionId -> квитанция (только в вашем браузере)
   seeded: false
 };
 
@@ -44,15 +50,76 @@ export function resetAll() {
   persist();
 }
 
+/* ————— симулированный бот Telegram ————— */
+
+function pushLog(from, text) {
+  state.telegram.log.push({ from, text, ts: Date.now() });
+  if (state.telegram.log.length > 12) state.telegram.log = state.telegram.log.slice(-12);
+}
+
+export function telegramAccount() {
+  if (!state.telegram.account) {
+    state.telegram.account = tg.createAccount();
+    persist();
+  }
+  return state.telegram.account;
+}
+
+export function telegramState() {
+  return state.telegram;
+}
+
+// «Отправка» /start боту: выдаём одноразовый код и пишем его в переписку.
+export function requestCode() {
+  const account = telegramAccount();
+  const previous = state.telegram.code;
+  const code = tg.createCode(account.id);
+  state.telegram.code = code;
+  pushLog('user', previous ? '/code' : '/start');
+  if (previous && !previous.used) pushLog('bot', `Предыдущий код ${previous.value} аннулирован.`);
+  pushLog('bot', `Ваш одноразовый код для входа: ${code.value}\nДействует 5 минут, подходит для одного входа. Никому его не передавайте.`);
+  persist();
+  return code;
+}
+
+// Смена демо-аккаунта: показывает, что привязка к мессенджеру защищает
+// от повторного голосования одним аккаунтом, но не от набора разных аккаунтов.
+export function switchAccount() {
+  state.telegram = { account: tg.createAccount(), code: null, log: [] };
+  state.session = null;
+  persist();
+  return state.telegram.account;
+}
+
 /* ————— сессия избирателя ————— */
 
-export async function signIn(rawId) {
-  const id = String(rawId || '').trim();
-  if (id.length < 3) throw new Error('Введите демо-идентификатор длиной не меньше 3 символов.');
-  const token = await sha256Hex(`voter:${id.toLowerCase()}`);
-  state.session = { token, label: `Избиратель ${token.slice(0, 6).toUpperCase()}` };
+async function buildIssuedTokens(token) {
+  const map = {};
+  for (const election of ELECTIONS) {
+    map[election.id] = await sha256Hex(`${token}:${election.id}`);
+  }
+  return map;
+}
+
+// Ввод кода из бота — единственный способ войти.
+export async function signInWithCode(input) {
+  const account = telegramAccount();
+  const result = tg.checkCode(state.telegram.code, input);
+  if (!result.ok) {
+    persist();  // счётчик попыток изменился
+    return result;
+  }
+
+  const token = await sha256Hex(`tg:${account.id}`);
+  state.session = {
+    token,
+    label: `@${account.username}`,
+    tg: { id: account.id, username: account.username, name: account.name },
+    issuedTokens: await buildIssuedTokens(token)
+  };
+  pushLog('bot', 'Вход подтверждён. Код погашен.');
   persist();
-  return state.session;
+  return { ok: true, session: state.session };
 }
 
 export function signOut() {
@@ -118,20 +185,31 @@ export async function seedIfNeeded() {
 
 /* ————— голосование ————— */
 
+// Право на бюллетень определяется списком выдачи, а не памятью браузера:
+// тот же аккаунт Telegram второй бюллетень не получит.
 export function hasVoted(electionId) {
-  return Boolean(state.mine[electionId]);
+  const session = state.session;
+  if (!session) return false;
+  return (state.issued[electionId] || []).includes(session.issuedTokens[electionId]);
 }
 
 export function myBallot(electionId) {
-  return state.mine[electionId] || null;
+  const session = state.session;
+  if (!session) return null;
+  return (state.ballots[session.token] || {})[electionId] || null;
+}
+
+export function allBallots() {
+  return Object.values(state.ballots).flatMap((byElection) => Object.entries(byElection)
+    .map(([electionId, ballot]) => ({ electionId, ...ballot })));
 }
 
 export function canVote(electionId) {
   const election = getElection(electionId);
   if (!election) return { ok: false, reason: 'Голосование не найдено.' };
-  if (!state.session) return { ok: false, reason: 'Войдите в демо-кабинет.' };
+  if (!state.session) return { ok: false, reason: 'Подтвердите личность через бота.' };
   if (electionStatus(election) !== 'active') return { ok: false, reason: 'Голосование сейчас закрыто.' };
-  if (hasVoted(electionId)) return { ok: false, reason: 'Бюллетень уже подан.' };
+  if (hasVoted(electionId)) return { ok: false, reason: 'Этот аккаунт уже получил бюллетень.' };
   return { ok: true };
 }
 
@@ -149,11 +227,11 @@ export async function castVote(electionId, optionId) {
 
   // Реестр выданных бюллетеней хранится отдельно от реестра голосов:
   // он отвечает только на вопрос «голосовал ли этот избиратель», но не «за что».
-  const issuedToken = await sha256Hex(`${state.session.token}:${electionId}`);
-  (state.issued[electionId] ||= []).push(issuedToken);
+  (state.issued[electionId] ||= []).push(state.session.issuedTokens[electionId]);
 
   const receipt = receiptFromHash(block.hash);
-  state.mine[electionId] = { receipt, salt, optionId, commitment, blockHash: block.hash, ts: block.ts };
+  const byElection = (state.ballots[state.session.token] ||= {});
+  byElection[electionId] = { receipt, salt, optionId, commitment, blockHash: block.hash, ts: block.ts };
   persist();
   return { receipt, block };
 }
@@ -226,12 +304,14 @@ export async function repairChain() {
     block.hash = await blockHash(block);
     prev = block.hash;
   }
-  // квитанции избирателя привязаны к записи по commitment — обновляем их
-  for (const ballot of Object.values(state.mine)) {
-    const block = state.chain.find((b) => b.commitment === ballot.commitment);
-    if (block) {
-      ballot.blockHash = block.hash;
-      ballot.receipt = receiptFromHash(block.hash);
+  // квитанции избирателей привязаны к записи по commitment — обновляем их
+  for (const byElection of Object.values(state.ballots)) {
+    for (const ballot of Object.values(byElection)) {
+      const block = state.chain.find((b) => b.commitment === ballot.commitment);
+      if (block) {
+        ballot.blockHash = block.hash;
+        ballot.receipt = receiptFromHash(block.hash);
+      }
     }
   }
   persist();
@@ -242,7 +322,7 @@ export async function lookupReceipt(normalized) {
   const block = state.chain.find((b) => b.hash.slice(0, 16).toUpperCase() === normalized);
   if (!block) return { found: false };
 
-  const ballot = Object.values(state.mine).find((m) => m.blockHash === block.hash);
+  const ballot = allBallots().find((m) => m.blockHash === block.hash);
   let proven = false;
   if (ballot) {
     const expected = await sha256Hex(`${ballot.optionId}:${ballot.salt}`);

@@ -337,3 +337,30 @@ details.table-view summary { cursor: pointer; color: var(--accent-ink); font-siz
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* — симуляция чата с ботом — */
+.tg-card { display: flex; flex-direction: column; }
+.tg-head { display: flex; align-items: center; gap: 11px; margin-bottom: 10px; }
+.tg-avatar {
+  width: 38px; height: 38px; flex: none; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: grid; place-items: center; font-size: .78rem; font-weight: 700; letter-spacing: .02em;
+}
+.tg-title { display: flex; flex-direction: column; line-height: 1.2; }
+.tg-title b { font-size: .98rem; }
+.tg-title small { color: var(--text-muted); font-size: .76rem; }
+
+.tg-chat {
+  display: flex; flex-direction: column; gap: 8px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px; margin: 10px 0 14px;
+  min-height: 190px; max-height: 300px; overflow-y: auto;
+}
+.tg-msg {
+  max-width: 85%; padding: 8px 12px; border-radius: 13px;
+  background: var(--surface-1); border: 1px solid var(--line);
+  font-size: .9rem; line-height: 1.45;
+  display: flex; align-items: flex-end; gap: 9px;
+}
+.tg-msg.is-user { align-self: flex-end; background: var(--accent-wash); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.tg-msg time { color: var(--text-muted); font-size: .7rem; flex: none; }
