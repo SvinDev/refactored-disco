@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ЭГ-Демо — прототип системы электронного голосования</title>
+<meta name="description" content="Учебный прототип системы электронного голосования: анонимный бюллетень, квитанция, проверка своего голоса и публичный реестр с хеш-цепочкой. Демонстрация, не государственная система.">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="assets/css/style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M9 16.5l5 5 9-11' fill='none' stroke='%23fff' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Перейти к содержимому</a>
+
+<div class="demo-strip" role="note">
+  <strong>Демонстрационный прототип.</strong>
+  Не является государственной информационной системой. Голоса не имеют юридической силы, данные хранятся только в вашем браузере.
+</div>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="#/">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7"/><path d="M9 16.5l5 5 9-11" fill="none" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="brand-text"><b>ЭГ-Демо</b><small>прототип электронного голосования</small></span>
+    </a>
+
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav" aria-label="Меню">
+      <span></span><span></span><span></span>
+    </button>
+
+    <nav id="site-nav" class="site-nav" aria-label="Основная навигация">
+      <a href="#/kabinet">Кабинет</a>
+      <a href="#/proverka">Проверка голоса</a>
+      <a href="#/reestr">Реестр</a>
+      <a href="#/kak-eto-rabotaet">Как устроено</a>
+      <button class="theme-toggle" type="button" aria-label="Переключить тему" title="Переключить тему">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="i-sun"><circle cx="12" cy="12" r="4.6"/><g stroke-linecap="round"><path d="M12 2.6v2.4M12 19v2.4M4.2 12H1.8M22.2 12h-2.4M6.1 6.1L4.4 4.4M19.6 19.6l-1.7-1.7M17.9 6.1l1.7-1.7M4.4 19.6l1.7-1.7"/></g></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="i-moon"><path d="M20.5 14.2A8.6 8.6 0 019.8 3.5a8.6 8.6 0 1010.7 10.7z"/></svg>
+      </button>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap" tabindex="-1">
+  <div id="view" aria-live="polite"></div>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p><strong>ЭГ-Демо</strong> — учебный проект с открытым кодом. Демонстрирует принципы проверяемого электронного голосования: анонимный бюллетень, квитанция избирателя, хеш-цепочка реестра.</p>
+    <p class="muted">Проект не связан с какими-либо государственными органами и избирательными комиссиями, не использует официальную символику и не собирает персональные данные. Никогда не вводите здесь паспортные данные, СНИЛС или пароли от реальных сервисов.</p>
+  </div>
+</footer>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
