@@ -25,11 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pages включается один раз вручную:
+      # Settings -> Pages -> Build and deployment -> Source: GitHub Actions.
+      # Токен воркфлоу не может создать сайт сам (нужны права администратора).
       - name: Configure Pages
         uses: actions/configure-pages@v5
-        with:
-          # включает GitHub Pages для репозитория, если он ещё не включён
-          enablement: true
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
